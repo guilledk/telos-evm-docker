@@ -12,23 +12,23 @@ from elasticsearch import Elasticsearch
 
 
 @pytest.fixture()
-def tevmc_local(request, tmp_path_factory):
+def tevmc_local(request, tmp_path_factory, capsys):
     request.applymarker(pytest.mark.config(**local.default_config))
-    with bootstrap_test_stack(request, tmp_path_factory) as tevmc:
+    with bootstrap_test_stack(request, tmp_path_factory, capsys) as tevmc:
         yield tevmc
 
 
 @pytest.fixture()
-def tevmc_testnet(request, tmp_path_factory):
+def tevmc_testnet(request, tmp_path_factory, capsys):
     request.applymarker(pytest.mark.config(**testnet.default_config))
-    with bootstrap_test_stack(request, tmp_path_factory) as tevmc:
+    with bootstrap_test_stack(request, tmp_path_factory, capsys) as tevmc:
         yield tevmc
 
 
 @pytest.fixture()
-def tevmc_mainnet(request, tmp_path_factory):
+def tevmc_mainnet(request, tmp_path_factory, capsys):
     request.applymarker(pytest.mark.config(**mainnet.default_config))
-    with bootstrap_test_stack(request, tmp_path_factory) as tevmc:
+    with bootstrap_test_stack(request, tmp_path_factory, capsys) as tevmc:
         yield tevmc
 
 
@@ -41,25 +41,22 @@ def prepare_db_for_test(
     delta_index_spec='delta-v1.5',
     docs_per_index=10_000_000
 ):
-    rpc_conf = tevmc.config['telos-evm-rpc']
-    es_config = tevmc.config['elasticsearch']
+    rpc_conf = tevmc.config.rpc
+    es_config = tevmc.config.elasticsearch
     es = Elasticsearch(
-        f'{es_config["protocol"]}://{es_config["host"]}',
-        basic_auth=(
-            es_config['user'], es_config['pass']
-        )
+        f'{es_config.protocol}://{tevmc.network_ip("elastic")}:{es_config.port}'
     )
     es.indices.delete(
-        index=f'{rpc_conf["elastic_prefix"]}-{action_index_spec}-*'
+        index=f'{rpc_conf.elastic_prefix}-{action_index_spec}-*'
     )
     es.indices.delete(
-        index=f'{rpc_conf["elastic_prefix"]}-{delta_index_spec}-*',
+        index=f'{rpc_conf.elastic_prefix}-{delta_index_spec}-*',
     )
 
     ops = []
     for rstart, rend in ranges:
         for i in range(rstart, rend + 1, 1):
-            delta_index = f'{rpc_conf["elastic_prefix"]}-{delta_index_spec}-{get_suffix(i, docs_per_index)}'
+            delta_index = f'{rpc_conf.elastic_prefix}-{delta_index_spec}-{get_suffix(i, docs_per_index)}'
             ops.append({
                 "index": {
                     "_index": delta_index
@@ -75,7 +72,7 @@ def prepare_db_for_test(
 
     indices = []
     for tx in txs:
-        action_index = f'{rpc_conf["elastic_prefix"]}-{action_index_spec}-{get_suffix(tx["@raw.block"], docs_per_index)}'
+        action_index = f'{rpc_conf.elastic_prefix}-{action_index_spec}-{get_suffix(tx["@raw.block"], docs_per_index)}'
         indices.append(action_index)
         ops.append({
             "index": {

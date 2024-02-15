@@ -16,7 +16,7 @@ def test_websocket_local_new_heads(tevmc_local):
     tevmc = tevmc_local
 
     # Opening a WebSocket connection to the local RPC.
-    ws = tevmc.open_rpc_websocket()
+    ws = tevmc.services['rpc'].open_rpc_websocket()
 
     # Sending a subscription request to listen to new block headers ('newHeads').
     ws.send(json.dumps({

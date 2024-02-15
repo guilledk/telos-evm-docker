@@ -39,10 +39,10 @@ def test_setcode_with_same_hash_subst(tevmc_local):
     )
     assert ec == 0
 
-    nodeos_logs = tevmc.cleos.wait_for_phrase_in_nodeos_logs(
-        'RCPT', lines=5, timeout=4,
-        from_file=tevmc.config['nodeos']['log_path']
-    )
+    found_receipt = False
+    for log in tevmc.stream_logs('nodeos', lines=5, timeout=4):
+        if 'RCPT' in log:
+            found_receipt = True
 
-    assert 'RCPT' in nodeos_logs
+    assert found_receipt
 

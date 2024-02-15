@@ -25,7 +25,7 @@ def test_all(tevmc_local):
     assert gas_price <= 120000000000
 
     # Test chain ID
-    chain_id = tevmc_local.config['telos-evm-rpc']['chain_id']
+    chain_id = tevmc_local.config['rpc']['chain_id']
     assert local_w3.eth.chain_id == chain_id
 
     # Test block number

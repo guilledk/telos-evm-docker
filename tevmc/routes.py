@@ -4,7 +4,6 @@ import time
 
 from flask import request, jsonify
 
-from tevmc.cmdline.build import build_service
 from tevmc.testing.database import ElasticDataIntegrityError, ElasticDriver
 
 
@@ -34,20 +33,14 @@ def add_routes(tevmc: 'TEVMController'):
             time.sleep(3)
             tevmc.start()
 
-        elif service == 'nodeos':
-            build_service(
-                Path('.'), 'nodeos', tevmc.config, nocache=must_update)
-            tevmc.restart_nodeos()
+        else:
+            if service not in tevmc.services:
+                return jsonify(error='service not found'), 404
 
-        elif service == 'indexer':
-            build_service(
-                Path('.'), 'indexer', tevmc.config, nocache=must_update)
-            tevmc.restart_translator()
-
-        elif service == 'rpc':
-            build_service(
-                Path('.'), 'rpc', tevmc.config, nocache=must_update)
-            tevmc.restart_rpc()
+            service = tevmc.services[service]
+            service.load_templates()
+            service.configure()
+            tevmc.build_service(use_cache=not must_update)
 
         return jsonify(success=True), 200
 

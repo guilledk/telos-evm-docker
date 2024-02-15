@@ -1,8 +1,8 @@
 {
   "chainId": $rpc_chain_id,
   "debug": $rpc_debug,
-  "apiHost": $rpc_host,
-  "apiPort": $rpc_api,
+  "apiHost": $rpc_api_host,
+  "apiPort": $rpc_api_port,
   "nodeos_read": $rpc_nodeos_read,
   "signer_account": $rpc_signer_account,
   "signer_permission": $rpc_signer_permission,

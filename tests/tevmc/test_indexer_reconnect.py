@@ -11,16 +11,17 @@ from tevmc.testing.database import ElasticDriver
 def test_indexer_reconnect(tevmc_local):
     tevmc = tevmc_local
 
-    for msg in tevmc.stream_logs('telosevm-translator'):
+    for msg in tevmc.stream_logs('translator', from_latest=True):
+        tevmc.logger.info(msg.rstrip())
         if 'drained' in msg:
             break
 
-    tevmc.restart_nodeos()
+    tevmc.restart_service('nodeos')
 
-    for msg in tevmc.stream_logs('telosevm-translator', from_latest=True):
-        tevmc.logger.info(msg)
+    for msg in tevmc.stream_logs('translator', from_latest=True):
+        tevmc.logger.info(msg.rstrip())
         if 'drained' in msg:
             break
 
-    elastic = ElasticDriver(tevmc.config)
+    elastic = ElasticDriver(tevmc.config.model_dump())
     elastic.full_integrity_check()

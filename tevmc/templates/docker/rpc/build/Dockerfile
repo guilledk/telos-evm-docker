@@ -23,5 +23,5 @@ COPY config.json config.json
 
 CMD ["node", "dist/main.js"]
 
-EXPOSE $api_port
-EXPOSE $ws_port
+EXPOSE $rpc_api_port
+EXPOSE $rpc_websocket_port

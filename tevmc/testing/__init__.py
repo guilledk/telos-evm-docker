@@ -1,11 +1,7 @@
 #!/usr/bin/env python3
 
 import sys
-import time
-import docker
-import logging
 import tarfile
-import requests
 
 import pytest
 
@@ -14,18 +10,14 @@ from pathlib import Path
 from contextlib import contextmanager
 
 from web3 import Web3
+from tevmc.cmdline.init import touch_conf
 
 from tevmc.config import (
-    build_docker_manifest,
     randomize_conf_ports,
-    randomize_conf_creds,
     add_virtual_networking
 )
-from tevmc.cmdline.init import touch_node_dir
-from tevmc.cmdline.cli import get_docker_client
 
-
-TEST_SERVICES = ['redis', 'elastic', 'kibana', 'nodeos', 'indexer', 'rpc']
+TEST_SERVICES = ['redis', 'elastic', 'nodeos', 'indexer', 'rpc']
 
 
 def maybe_get_marker(request, mark_name: str, field: str, default):
@@ -46,11 +38,9 @@ def get_marker(request, mark_name: str, field: str):
 
 
 @contextmanager
-def bootstrap_test_stack(request, tmp_path_factory):
+def bootstrap_test_stack(request, tmp_path_factory, capsys):
     from tevmc import TEVMController
     config = get_marker(request, 'config', 'kwargs')
-    tevmc_params = maybe_get_marker(
-        request, 'tevmc_params', 'kwargs', {})
 
     custom_subst_abi = maybe_get_marker(
         request, 'custom_subst_abi', 'args', [None])[0]
@@ -61,34 +51,31 @@ def bootstrap_test_stack(request, tmp_path_factory):
 
     randomize = maybe_get_marker(request, 'randomize', 'args', [True])[0]
 
-    services = list(maybe_get_marker(
-        request, 'services', 'args', TEST_SERVICES))
-
     if randomize:
         config = randomize_conf_ports(config)
-        config = randomize_conf_creds(config)
+
+    config['daemon']['services'] = maybe_get_marker(
+        request, 'services', 'args', TEST_SERVICES
+    )
 
     if sys.platform == 'darwin':
         config = add_virtual_networking(config)
 
-    client = get_docker_client()
-
-    chain_name = config['telos-evm-rpc']['elastic_prefix']
+    chain_name = config['rpc']['elastic_prefix']
 
     tmp_path = tmp_path_factory.getbasetemp() / chain_name
     tmp_path.mkdir(parents=True, exist_ok=True)
-    touch_node_dir(tmp_path, config, 'tevmc.json')
 
     if custom_subst_wasm:
         copyfile(
             custom_subst_wasm,
-            tmp_path / 'docker/leap/contracts/eosio.evm/regular/regular.wasm'
+            tmp_path / 'docker/nodeos/contracts/eosio.evm/regular/regular.wasm'
         )
 
     if custom_subst_abi:
         copyfile(
             custom_subst_abi,
-            tmp_path / 'docker/leap/contracts/eosio.evm/regular/regular.abi'
+            tmp_path / 'docker/nodeos/contracts/eosio.evm/regular/regular.abi'
         )
 
     if custom_nodeos_tar:
@@ -97,7 +84,8 @@ def bootstrap_test_stack(request, tmp_path_factory):
 
         bin_name = str(extensionless_path)
 
-        host_config_path = tmp_path / 'docker/leap/config'
+        host_config_path = tmp_path / 'docker/nodeos/config'
+        host_config_path.mkdir(parents=True, exist_ok=True)
 
         with tarfile.open(custom_nodeos_tar, 'r:gz') as file:
             file.extractall(path=host_config_path)
@@ -108,52 +96,25 @@ def bootstrap_test_stack(request, tmp_path_factory):
 
         config['nodeos']['nodeos_bin'] = '/root/' + binary
 
-    containers = None
+    config['daemon']['testing'] = True
+    touch_conf(tmp_path / 'tevmc.json', config)
 
-    try:
-        with TEVMController(
-            config,
-            root_pwd=tmp_path,
-            services=services,
-            **tevmc_params
-        ) as _tevmc:
+    with capsys.disabled():
+        print()
+        with TEVMController(root_pwd=tmp_path) as _tevmc:
             yield _tevmc
-            containers = _tevmc.containers
-
-    except BaseException:
-        if containers:
-            client = get_docker_client(timeout=10)
-
-            for val in containers:
-                while True:
-                    try:
-                        container = client.containers.get(val)
-                        container.stop()
-
-                    except docker.errors.APIError as err:
-                        if 'already in progress' in str(err):
-                            time.sleep(0.1)
-                            continue
-
-                    except requests.exceptions.ReadTimeout:
-                        print('timeout!')
-
-                    except docker.errors.NotFound:
-                        print(f'{val} not found!')
-
-                    break
-        raise
 
 
 @pytest.fixture
-def tevm_node(request, tmp_path_factory):
-    with bootstrap_test_stack(request, tmp_path_factory) as tevmc:
+def tevm_node(request, tmp_path_factory, capsys):
+    with bootstrap_test_stack(request, tmp_path_factory, capsys) as tevmc:
         yield tevmc
 
 
 def open_web3(tevm_node):
-    rpc_api_port = tevm_node.config['telos-evm-rpc']['api_port']
-    eth_api_endpoint = f'http://127.0.0.1:{rpc_api_port}/evm'
+    rpc_api_port = tevm_node.config.rpc.api_port
+    rpc_ip = tevm_node.network_ip('rpc')
+    eth_api_endpoint = f'http://{rpc_ip}:{rpc_api_port}/evm'
 
     w3 = Web3(Web3.HTTPProvider(eth_api_endpoint))
     assert w3.is_connected()
@@ -162,8 +123,9 @@ def open_web3(tevm_node):
 
 
 def open_websocket_web3(tevm_node):
-    rpc_ws_port = tevm_node.config['telos-evm-rpc']['rpc_websocket_port']
-    eth_ws_endpoint = f'ws://127.0.0.1:{rpc_ws_port}/evm'
+    rpc_ws_port = tevm_node.config.rpc.websocket_port
+    rpc_ip = tevm_node.services.rpc.ip
+    eth_ws_endpoint = f'ws://{rpc_ip}:{rpc_ws_port}/evm'
 
     w3 = Web3(Web3.WebsocketProvider(eth_ws_endpoint))
     assert w3.is_connected()

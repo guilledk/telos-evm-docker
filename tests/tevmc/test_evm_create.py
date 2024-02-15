@@ -4,7 +4,6 @@ from leap.sugar import random_string, Asset
 from leap.tokens import tlos_token
 
 from tevmc.utils import to_wei
-from tevmc.config import local
 from tevmc.testing import open_web3
 
 

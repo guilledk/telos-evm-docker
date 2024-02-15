@@ -1,5 +1,6 @@
 
 from decimal import localcontext
+import json
 
 import re
 import decimal
@@ -10,6 +11,7 @@ import collections.abc
 from typing import (
     Any,
     AnyStr,
+    Dict,
     NewType,
     Union,
 )
@@ -283,6 +285,25 @@ def is_hex(value: Any) -> bool:
     return _HEX_REGEXP.fullmatch(value) is not None
 
 
+def flatten(master_key, _dict, fkey=None) -> Dict:
+    ndict = {}
+    if not fkey:
+        fkey = master_key
+
+    for key, val in _dict[fkey].items():
+        ndict[f'{master_key}_{key}'] = val
+
+    return ndict
+
+
+def jsonize(_dict: Dict[str, Any], **kwargs) -> Dict[str, str]:
+    ndict = {}
+    for key, val in _dict.items():
+        ndict[key] = json.dumps(val, **kwargs)
+
+    return ndict
+
+
 import struct
 import requests_unixsocket
 from requests.exceptions import Timeout
@@ -365,4 +386,17 @@ def docker_stream_logs(container, timeout=30.0, from_latest=False):
                     data_buffer = data_buffer[len(message)+8:]
 
     except Timeout:
-        raise StopIteration(f'No logs received for {timeout} seconds.')
+        ...
+
+
+def service_alias_to_fullname(alias: str):
+    if alias in ['elastic', 'es']:
+        return 'elasticsearch'
+
+    if alias in ['indexer']:
+        return 'translator'
+
+    if alias in ['api']:
+        return 'rpc'
+
+    return alias

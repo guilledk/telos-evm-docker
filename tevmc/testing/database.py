@@ -6,6 +6,17 @@ from typing import List, Optional
 
 from elasticsearch import Elasticsearch, NotFoundError
 
+import time
+import json
+import logging
+
+import docker
+from docker.types import Mount
+
+from leap.sugar import download_snapshot
+from tevmc.config import load_config, write_config
+from tevmc.config.typing import ConfigDict
+
 
 locale.setlocale(locale.LC_ALL, 'en_US.UTF-8')
 
@@ -137,17 +148,15 @@ class ESGapFound(ElasticDataIntegrityError):
 
 class ElasticDriver:
 
-    def __init__(self, config: dict):
+    def __init__(self, config: ConfigDict):
         self.config = config
-        self.chain_name = config['telos-evm-rpc']['elastic_prefix']
+        self.chain_name = config.rpc.elastic_prefix
         self.docs_per_index = 10_000_000
 
-        es_config = config['elasticsearch']
+        es_config = config.elasticsearch
+        ip = es_config.virtual_ip if es_config.virtual_ip else '127.0.0.1'
         self.elastic = Elasticsearch(
-            f'{es_config["protocol"]}://{es_config["host"]}',
-            basic_auth=(
-                es_config['user'], es_config['pass']
-            )
+            f'{es_config.protocol}://{ip}:{es_config.port}'
         )
 
     def tx_from_hash(self, h: str):
@@ -578,3 +587,73 @@ class ElasticDriver:
 
         # return last valid block nums
         return doc.block_num - 1, doc.global_block_num - 1
+
+
+def perform_data_repair(config_path, progress=True):
+    from tevmc.tevmc import TEVMController
+
+    logger = logging.getLogger('tevmc-repair')
+
+    root_pwd = config_path.parent.resolve()
+    config = load_config(str(root_pwd), config_path.name)
+
+    chain_name = config['rpc']['elastic_prefix']
+
+    if ('mainnet' not in chain_name and
+        'testnet' not in chain_name):
+        raise ValueError(
+            'tevmc repair should only be run against '
+            'mainnet or testnet nodes'
+        )
+
+    chain_type = 'mainnet' if 'mainnet' in chain_name else 'testnet'
+
+    logger.info('repairing elastic data...')
+
+    services = config['daemon']['services'].copy()
+    config['daemon']['services'] = ['elastic']
+    with TEVMController(
+        root_pwd=root_pwd,
+        config=config
+    ) as _tevmc:
+        time.sleep(5)
+        es = ElasticDriver(_tevmc.config)
+        last_valid_nums = es.repair_data()
+
+    logger.info(f'done, last valid blocks {last_valid_nums}')
+    logger.info('downloading closest snapshot...')
+
+    docker_dir = root_pwd / 'docker'
+    nodeos_conf_dir = docker_dir
+    nodeos_conf_dir /= config['nodeos']['docker_path']
+    nodeos_conf_dir /= config['nodeos']['config_path']
+
+    snap_path = download_snapshot(
+        nodeos_conf_dir, last_valid_nums[0],
+        network=chain_type, progress=progress)
+
+    logger.info('updating tevmc.json...')
+
+    config['daemon']['services'] = services
+
+    config['nodeos']['snapshot'] = f'/root/{snap_path.name}'
+
+    config['translator']['start_block'] = last_valid_nums[0]
+
+    write_config(config, str(config_path.parent), 'tevmc.json')
+
+    logger.info('done, deleting dirty nodeos data...')
+
+    nodeos_data_path = config['nodeos']['docker_path']
+    nodeos_data_path += '/' + config['nodeos']['data_path']
+
+    # delete file using docker cause usually has root perms
+    client = docker.from_env()
+    client.containers.run(
+        'bash',
+        f'bash -c \"rm -rf /root/target/docker/{nodeos_data_path}/*\"',
+        remove=True,
+        mounts=[Mount('/root/target', str(docker_dir.parent), 'bind')]
+    )
+
+    assert not (docker_dir / nodeos_data_path / 'blocks').is_dir()

@@ -6,6 +6,8 @@ from pathlib import Path
 
 import click
 
+from tevmc.utils import service_alias_to_fullname
+
 from .cli import cli
 from ..config import load_config
 
@@ -36,35 +38,27 @@ def stream(pid, logpath, target_dir, config, source):
     except FileNotFoundError:
         print('daemon not running.')
 
-    # abreviations
-    if source in ['elastic', 'es']:
-        source = 'elasticsearch'
-
-    if source in ['indexer', 'translator', 'evm']:
-        source = 'telosevm-translator'
-
-    if source in ['api', 'rpc']:
-        source = 'telos-evm-rpc'
+    source = service_alias_to_fullname(source)
 
     try:
         if source == 'daemon':
             subprocess.run(['tail', '-f', logpath])
             return
 
-        chain_name = config['telos-evm-rpc']['elastic_prefix']
+        chain_name = config['rpc']['elastic_prefix']
         src_config = config[source]
 
         if source == 'nodeos':
             nos_docker = src_config['docker_path']
-            nos_config = src_config['conf_dir']
-            filename = Path(src_config['log_path']).name
+            nos_config = src_config['config_path']
+            filename = src_config['logs_file']
             nodeos_log_file = target_dir
             nodeos_log_file += f'/docker/{nos_docker}/{nos_config}/{filename}'
             subprocess.run(
                 ['tail', '-f', nodeos_log_file])
 
         elif source in config:
-            container_name = f'{src_config["name"]}-{pid}-{chain_name}'
+            container_name = f'{chain_name}-{pid}-{src_config["name"]}'
             subprocess.run(
                 ['docker', 'logs', '-f', container_name])
 

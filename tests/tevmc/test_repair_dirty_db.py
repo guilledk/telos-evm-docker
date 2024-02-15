@@ -1,51 +1,66 @@
 #!/usr/bin/env python3
 
 import logging
+import docker
 
 import pytest
 
 from tevmc.cmdline.repair import perform_data_repair
-from tevmc.config import load_config
+from tevmc.config import load_config, write_config
 
 
 EVM_1_5_ENDPOINT = 'https://mainnet15a.telos.net/evm'
 
+
 @pytest.mark.randomize(False)
-@pytest.mark.tevmc_params(is_producer=False)
 @pytest.mark.services('redis', 'elastic', 'nodeos', 'indexer')
 def test_repair_dirty_db(tevmc_mainnet):
     tevmc = tevmc_mainnet
 
-    tevmc.cleos.wait_blocks(100_000)
+    tevmc.cleos.wait_blocks(110_000)
+
+    nodeos_service = tevmc.services.nodeos
 
     # ungracefull nodeos stop
-    tevmc.containers['nodeos'].stop()
+    try:
+        for i in range(3):
+            nodeos_service.container.reload()
+            nodeos_service.container.stop()
+
+    except docker.errors.APIError:
+        ...
+
+    # tear down node
+    tevmc.stop()
 
     # assert db is dirty
-    tevmc.is_nodeos_relaunch = True
-    tevmc.start_nodeos(do_init=False)
+    tevmc.load_config()
+    tevmc.config.nodeos.api_check = False
+    tevmc.config.nodeos.wait_startup = False
+    tevmc.update_configs()
+    tevmc.restart_service('nodeos')
     is_dirty = False
-    for line in tevmc._stream_nodeos(lines=10):
-        logging.info(line)
+    for line in nodeos_service.stream_logs(lines=10):
+        logging.info(line.rstrip())
         if 'database dirty flag set (likely due to unclean shutdown)' in line:
             is_dirty = True
             break
 
     assert is_dirty
 
-    # tear down node
     tevmc.stop()
 
     # run repair
     perform_data_repair(
         tevmc.root_pwd / 'tevmc.json', progress=False)
 
-    # update config
-    tevmc.is_nodeos_relaunch = False
-    tevmc.services += ['rpc']
-    tevmc.config = load_config(tevmc.root_pwd, 'tevmc.json')
+    # add rpc service & update config
+    tevmc.load_config()
+    tevmc.config.daemon.services += ['rpc']
+    tevmc.update_configs()
 
     # pull up node
+    tevmc.initialize()
     tevmc.start()
     tevmc.cleos.wait_blocks(10_000)
 

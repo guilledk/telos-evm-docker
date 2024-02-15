@@ -21,14 +21,11 @@ def test_integrity_elastic(tevmc_local):
     tevmc = tevmc_local
     local_w3 = open_web3(tevmc_local)
 
-    index = tevmc.config['telos-evm-rpc']['elastic_prefix'] + '-action-*'
+    index = tevmc.config.rpc.elastic_prefix + '-action-*'
 
-    es_config = tevmc.config['elasticsearch']
+    es_config = tevmc.config.elasticsearch
     es = Elasticsearch(
-        f'{es_config["protocol"]}://{es_config["host"]}',
-        basic_auth=(
-            es_config['user'], es_config['pass']
-        )
+        f'{es_config.protocol}://{tevmc.network_ip("elastic")}:{es_config.port}'
     )
 
     def get_elastic_balance(addr: str | Account):

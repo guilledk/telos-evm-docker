@@ -3,13 +3,12 @@
 import json
 import socket
 import random
+from string import Template
 
 from typing import Dict, List, Any
 from pathlib import Path
 
 import docker
-
-from leap.sugar import random_string
 
 from .default import local, testnet, mainnet
 
@@ -18,6 +17,15 @@ DEFAULT_DOCKER_LABEL = {'created-by': 'tevmc'}
 DEFAULT_FILTER = {'label': DEFAULT_DOCKER_LABEL}
 
 MAX_STATUS_SIZE = 54
+
+
+def write_templated_file(
+    target_dir: Path,
+    template: Template,
+    subst: Dict[str, Any]
+):
+    with open(target_dir, 'w+') as target_file:
+        target_file.write(template.substitute(**subst))
 
 
 def get_config(key, _dict):
@@ -41,6 +49,14 @@ def load_config(location: str, name: str) -> Dict[str, Dict]:
 
     with open(config_file, 'r') as config_file:
         return json.loads(config_file.read())
+
+def write_config(config: dict, location: str, name: str):
+    target_dir = (Path(location)).resolve()
+    config_file = (target_dir / name).resolve()
+
+    with open(config_file, 'w+') as config_file:
+        config_file.write(json.dumps(config, indent=4))
+
 
 
 def build_docker_manifest(config: Dict) -> List[str]:
@@ -100,18 +116,11 @@ def randomize_conf_ports(config: Dict) -> Dict:
             else:
                 return port_num
 
-    def get_free_local_addr():
-        return f'127.0.0.1:{get_free_port()}'
-
-    def get_free_remote_addr():
-        return f'0.0.0.0:{get_free_port()}'
-
     # redis
     ret['redis']['port'] = get_free_port()
 
     # elasticsearch
-    elastic_addr = get_free_remote_addr()
-    ret['elasticsearch']['host'] = elastic_addr
+    ret['elasticsearch']['port'] = get_free_port()
 
     # kibana
     ret['kibana']['port'] = get_free_port()
@@ -125,26 +134,18 @@ def randomize_conf_ports(config: Dict) -> Dict:
 
     # telos-evm-rpc
     idx_ws_port = get_free_port()
-    ret['telos-evm-rpc']['indexer_websocket_port'] = idx_ws_port
-    ret['telos-evm-rpc']['indexer_websocket_uri'] = f'ws://127.0.0.1:{idx_ws_port}/evm'
+    ret['rpc']['indexer_websocket_port'] = idx_ws_port
+    ret['rpc']['indexer_websocket_uri'] = f'ws://127.0.0.1:{idx_ws_port}/evm'
 
-    ret['telos-evm-rpc']['rpc_websocket_port'] = get_free_port()
+    ret['rpc']['websocket_port'] = get_free_port()
 
-    ret['telos-evm-rpc']['api_port'] = get_free_port()
+    ret['rpc']['api_port'] = get_free_port()
 
-    if '127.0.0.1' in ret['telos-evm-rpc']['remote_endpoint']:
-        ret['telos-evm-rpc']['remote_endpoint'] = f'http://127.0.0.1:{nodeos_http_port}/evm'
-
-    return ret
-
-def randomize_conf_creds(config: Dict) -> Dict:
-    ret = config.copy()
-
-    ret['elasticsearch']['user'] = random_string(size=16)
-    ret['elasticsearch']['elastic_pass'] = random_string(size=32)
-    ret['elasticsearch']['pass'] = random_string(size=32)
+    if '127.0.0.1' in ret['rpc']['remote_endpoint']:
+        ret['rpc']['remote_endpoint'] = f'http://127.0.0.1:{nodeos_http_port}/evm'
 
     return ret
+
 
 def add_virtual_networking(config: Dict) -> Dict:
     ret = config.copy()
@@ -170,12 +171,12 @@ def add_virtual_networking(config: Dict) -> Dict:
     ret['beats']['virtual_ip'] = ips[4]
 
     # translator
-    ret['telosevm-translator']['virtual_ip'] = ips[5]
+    ret['translator']['virtual_ip'] = ips[5]
 
     # rpc
-    ret['telos-evm-rpc']['virtual_ip'] = ips[6]
-    ret['telos-evm-rpc']['api_host'] = ips[6]
-    indexer_ws_port = ret['telos-evm-rpc']['indexer_websocket_port']
-    ret['telos-evm-rpc']['indexer_websocket_uri'] = f'ws://{ips[5]}:{indexer_ws_port}/evm'
+    ret['rpc']['virtual_ip'] = ips[6]
+    ret['rpc']['api_host'] = ips[6]
+    indexer_ws_port = ret['rpc']['indexer_websocket_port']
+    ret['rpc']['indexer_websocket_uri'] = f'ws://{ips[5]}:{indexer_ws_port}/evm'
 
     return ret
